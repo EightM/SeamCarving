@@ -1,30 +1,45 @@
 package seamcarving
 
-import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.File
-import java.util.*
 import javax.imageio.ImageIO
 
-fun main() {
-    val scanner = Scanner(System.`in`)
-    println("Enter rectangle width:")
-    val width = scanner.nextInt()
-    println("Enter rectangle height:")
-    val height = scanner.nextInt()
-    println("Enter output image name:")
-    val fileName = scanner.next()
+fun main(args: Array<String>) {
 
-    createImageFile(width, height, fileName)
+    val appArgs = getArgsMap(args)
+
+    val bufferedImage = ImageIO.read(File(appArgs["-in"].orEmpty()))
+    for (i in 0 until bufferedImage.width) {
+        for (j in 0 until bufferedImage.height) {
+            changePixel(bufferedImage, i, j)
+        }
+    }
+
+    ImageIO.write(bufferedImage, "png", File(appArgs["-out"].orEmpty()))
 }
 
-private fun createImageFile(width: Int, height: Int, fileName: String) {
-    val bufferedImage = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
-    val graphics = bufferedImage.graphics
+private fun changePixel(bufferedImage: BufferedImage, x: Int, y: Int) {
+    val currentRgb = bufferedImage.getRGB(x, y)
+    // Color in int like 11111111 11111111 00000000 00000000
+    // where first eight digits are alpha (always 255), and then red, green and blue
+    val red = currentRgb.shr(16).and(0xFF)
+    val green = currentRgb.shr(8).and(0xFF)
+    val blue = currentRgb.and(0xFF)
 
-    graphics.color = Color.RED
-    graphics.drawLine(0, 0, width - 1, height - 1)
-    graphics.drawLine(0, height - 1, width - 1, 0)
+    val alpha = 255.shl(24)
+    val newRed = (255 - red).shl(16);
+    val newGreen = (255 - green).shl(8)
+    val newBlue = 255 - blue
+    val newRGB = alpha.or(newRed).or(newGreen).or(newBlue)
+    bufferedImage.setRGB(x, y, newRGB)
+}
 
-    ImageIO.write(bufferedImage, "png", File(fileName))
+private fun getArgsMap(args: Array<String>): Map<String, String> {
+    if (args.size < 4) {
+        throw IllegalArgumentException("Wrong parameters")
+    }
+
+    val appArgs = mutableMapOf<String, String>()
+    for (i in 0..args.lastIndex step 2) appArgs[args[i]] = args[i + 1]
+    return appArgs
 }
