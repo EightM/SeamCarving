@@ -12,14 +12,14 @@ fun main(args: Array<String>) {
 
     val bufferedImage = ImageIO.read(File(appArgs["-in"].orEmpty()))
     val energyMap = calculatePixelsEnergy(bufferedImage)
-    findAndPaintSeamWithLowestEnergy(energyMap, bufferedImage)
+    findAndPaintHorizontalSeamWithLowestEnergy(energyMap, bufferedImage )
     ImageIO.write(bufferedImage, "png", File(appArgs["-out"].orEmpty()))
 }
 
-fun findAndPaintSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
+fun findAndPaintVerticalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
     val costs = mutableMapOf<Pixel, Double>()
     val parents = mutableMapOf<Pixel, Pixel>()
-    energyMap.entries.filter { it.key.y == 0 }.forEach { costs[it.key] = it.value}
+    energyMap.entries.filter { it.key.y == 0 }.forEach { costs[it.key] = it.value }
 
     // Используем динамическое программирование:
     // Начинаем со второго ряда, для каждого пикселя ищем соседа сверху с минимальной энергией
@@ -31,21 +31,49 @@ fun findAndPaintSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImag
     for (y in 1 until bufferedImage.height) {
         for (x in 0 until bufferedImage.width) {
             val currentPixel = Pixel(x, y)
-            val minNeighbor = getMinEnergyNeighbor(currentPixel, bufferedImage.width, costs)
+            val minNeighbor = getMinEnergyTopNeighbor(currentPixel, bufferedImage.width, costs)
 
             costs[currentPixel] = energyMap[currentPixel]!! + costs[minNeighbor]!!
             parents[currentPixel] = minNeighbor
         }
     }
 
-    var lastMinPixel = costs.entries.filter { it.key.y == bufferedImage.height - 1 }.minByOrNull { it.value }?.key
+    paintSeamRed(costs, parents, bufferedImage)
+}
+
+fun findAndPaintHorizontalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
+    val costs = mutableMapOf<Pixel, Double>()
+    val parents = mutableMapOf<Pixel, Pixel>()
+    energyMap.entries.filter { it.key.x == 0 }.forEach { costs[it.key] = it.value }
+
+    for (x in 1 until bufferedImage.width) {
+        for (y in 0 until bufferedImage.height) {
+            val currentPixel = Pixel(x, y)
+            val minNeighbor = getMinEnergyLeftNeighbor(currentPixel, bufferedImage.width, costs)
+
+            costs[currentPixel] = energyMap[currentPixel]!! + costs[minNeighbor]!!
+            parents[currentPixel] = minNeighbor
+        }
+    }
+
+    paintSeamRed(costs, parents, bufferedImage, true)
+}
+
+fun paintSeamRed(
+    costs: Map<Pixel, Double>,
+    parents: Map<Pixel, Pixel>,
+    bufferedImage: BufferedImage,
+    isHorizontalSeam: Boolean = false
+) {
+    val border = if (isHorizontalSeam) bufferedImage.width - 1 else bufferedImage.height - 1
+    var lastMinPixel = costs.entries.filter { it.key.x == border }.minByOrNull { it.value }?.key
     while (lastMinPixel != null) {
         paintPixelInRed(bufferedImage, lastMinPixel)
         lastMinPixel = parents[lastMinPixel]
     }
 }
 
-fun getMinEnergyNeighbor(currentPixel: Pixel, imageWidth: Int, costs: Map<Pixel, Double>): Pixel {
+fun getMinEnergyTopNeighbor(currentPixel: Pixel, imageWidth: Int, costs: Map<Pixel, Double>): Pixel {
     val set = mutableSetOf<Pixel>()
     val pixelOne = Pixel(currentPixel.x, currentPixel.y - 1)
     set += pixelOne
@@ -57,6 +85,24 @@ fun getMinEnergyNeighbor(currentPixel: Pixel, imageWidth: Int, costs: Map<Pixel,
 
     if (currentPixel.x != imageWidth - 1) {
         val pixelThree = Pixel(currentPixel.x + 1, currentPixel.y - 1)
+        set += pixelThree
+    }
+
+    return set.minByOrNull { costs[it] ?: Double.POSITIVE_INFINITY } ?: Pixel(-1, -1)
+}
+
+fun getMinEnergyLeftNeighbor(currentPixel: Pixel, imageHeight: Int, costs: Map<Pixel, Double>): Pixel {
+    val set = mutableSetOf<Pixel>()
+    val pixelOne = Pixel(currentPixel.x - 1, currentPixel.y)
+    set += pixelOne
+
+    if (currentPixel.y != 0) {
+        val pixelTwo = Pixel(currentPixel.x - 1, currentPixel.y - 1)
+        set += pixelTwo
+    }
+
+    if (currentPixel.y != imageHeight - 1) {
+        val pixelThree = Pixel(currentPixel.x - 1, currentPixel.y + 1)
         set += pixelThree
     }
 
