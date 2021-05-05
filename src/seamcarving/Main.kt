@@ -1,6 +1,7 @@
 package seamcarving
 
 import java.awt.image.BufferedImage
+import java.awt.image.BufferedImage.TYPE_INT_RGB
 import java.io.File
 import javax.imageio.ImageIO
 import kotlin.math.abs
@@ -10,13 +11,26 @@ fun main(args: Array<String>) {
 
     val appArgs = getArgsMap(args)
 
-    val bufferedImage = ImageIO.read(File(appArgs["-in"].orEmpty()))
+    var bufferedImage = ImageIO.read(File(appArgs["-in"].orEmpty()))
     val energyMap = calculatePixelsEnergy(bufferedImage)
-    findAndPaintHorizontalSeamWithLowestEnergy(energyMap, bufferedImage )
+    val verticalSeamsCount = appArgs["-width"]?.toInt() ?: 0
+    val horizontalSeamsCount = appArgs["-height"]?.toInt() ?: 0
+
+    for (i in 0 until verticalSeamsCount) {
+        bufferedImage = findAndRemoveVerticalSeamWithLowestEnergy(energyMap, bufferedImage)
+    }
+
+    for (i in 0 until horizontalSeamsCount) {
+        bufferedImage = findAndRemoveHorizontalSeamWithLowestEnergy(energyMap, bufferedImage)
+    }
+
     ImageIO.write(bufferedImage, "png", File(appArgs["-out"].orEmpty()))
 }
 
-fun findAndPaintVerticalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
+fun findAndRemoveVerticalSeamWithLowestEnergy(
+    energyMap: Map<Pixel, Double>,
+    bufferedImage: BufferedImage
+): BufferedImage {
     val costs = mutableMapOf<Pixel, Double>()
     val parents = mutableMapOf<Pixel, Pixel>()
     energyMap.entries.filter { it.key.y == 0 }.forEach { costs[it.key] = it.value }
@@ -38,10 +52,13 @@ fun findAndPaintVerticalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, buff
         }
     }
 
-    paintSeamRed(costs, parents, bufferedImage)
+    return deleteSeam(costs, parents, bufferedImage)
 }
 
-fun findAndPaintHorizontalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
+fun findAndRemoveHorizontalSeamWithLowestEnergy(
+    energyMap: Map<Pixel, Double>,
+    bufferedImage: BufferedImage
+): BufferedImage {
     val costs = mutableMapOf<Pixel, Double>()
     val parents = mutableMapOf<Pixel, Pixel>()
     energyMap.entries.filter { it.key.x == 0 }.forEach { costs[it.key] = it.value }
@@ -56,22 +73,69 @@ fun findAndPaintHorizontalSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bu
         }
     }
 
-    paintSeamRed(costs, parents, bufferedImage, true)
+    return deleteSeam(costs, parents, bufferedImage, true)
 }
 
-fun paintSeamRed(
+fun deleteSeam(
     costs: Map<Pixel, Double>,
     parents: Map<Pixel, Pixel>,
     bufferedImage: BufferedImage,
     isHorizontalSeam: Boolean = false
-) {
+): BufferedImage {
     val border = if (isHorizontalSeam) bufferedImage.width - 1 else bufferedImage.height - 1
+    val xShift = if (isHorizontalSeam) 0 else 1
+    val yShift = if (isHorizontalSeam) 1 else 0
     var lastMinPixel = costs.entries.filter { it.key.x == border }.minByOrNull { it.value }?.key
+    val pixelsForDeletion = mutableSetOf<Pixel>()
     while (lastMinPixel != null) {
-        paintPixelInRed(bufferedImage, lastMinPixel)
+        pixelsForDeletion += lastMinPixel
         lastMinPixel = parents[lastMinPixel]
     }
+
+    return when {
+        isHorizontalSeam -> deleteHorizontalSeam(bufferedImage, xShift, yShift, pixelsForDeletion)
+        else -> deleteVerticalSeam(bufferedImage, xShift, yShift, pixelsForDeletion)
+    }
 }
+
+private fun deleteVerticalSeam(
+    bufferedImage: BufferedImage,
+    xShift: Int,
+    yShift: Int,
+    pixelsForDeletion: MutableSet<Pixel>
+): BufferedImage {
+    val newImage = BufferedImage(bufferedImage.width - xShift, bufferedImage.height - yShift, TYPE_INT_RGB)
+    for (y in 0 until newImage.height) {
+        var shift = 0
+        for (x in 0 until newImage.width) {
+            if (pixelsForDeletion.contains(Pixel(x, y))) {
+                shift = 1
+            }
+            newImage.setRGB(x, y, bufferedImage.getRGB(x + shift, y))
+        }
+    }
+    return newImage
+}
+
+private fun deleteHorizontalSeam(
+    bufferedImage: BufferedImage,
+    xShift: Int,
+    yShift: Int,
+    pixelsForDeletion: MutableSet<Pixel>
+): BufferedImage {
+    val newImage = BufferedImage(bufferedImage.width - xShift, bufferedImage.height - yShift, TYPE_INT_RGB)
+    for (x in 0 until newImage.width) {
+        var shift = 0
+        for (y in 0 until newImage.height) {
+            if (pixelsForDeletion.contains(Pixel(x, y))) {
+                shift = 1
+            }
+            newImage.setRGB(x, y, bufferedImage.getRGB(x, y + shift))
+        }
+    }
+    return newImage
+}
+
 
 fun getMinEnergyTopNeighbor(currentPixel: Pixel, imageWidth: Int, costs: Map<Pixel, Double>): Pixel {
     val set = mutableSetOf<Pixel>()
@@ -120,13 +184,6 @@ fun calculatePixelsEnergy(bufferedImage: BufferedImage): Map<Pixel, Double> {
     return energyMap
 }
 
-fun paintPixelInRed(bufferedImage: BufferedImage, pixel: Pixel?) {
-    val alpha = 255 shl 24
-    val red = 255 shl 16
-    val newColor = alpha or red
-    bufferedImage.setRGB(pixel?.x ?: -1, pixel?.y ?: -1, newColor)
-}
-
 fun calculatePixelEnergy(bufferedImage: BufferedImage, x: Int, y: Int): Double {
     val diffX = when (x) {
         0 -> getDiff(bufferedImage, x + 1, y, xShift = 1)
@@ -158,27 +215,8 @@ fun getColorFromPixel(bufferedImage: BufferedImage, x: Int, y: Int): Color {
     return Color(red, green, blue)
 }
 
-private fun changePixel(
-    bufferedImage: BufferedImage,
-    maxEnergy: Double,
-    energyMap: Map<Pixel, Double>,
-    x: Int,
-    y: Int
-) {
-    // Color in int like 11111111 11111111 00000000 00000000
-    // where first eight digits are alpha (always 255), and then red, green and blue
-    val pixelEnergy = energyMap[Pixel(x, y)] ?: 0.0
-    val intensity = (255.0 * pixelEnergy / maxEnergy).toInt()
-
-    val alpha = 255.shl(24)
-    val newRed = (intensity).shl(16)
-    val newGreen = (intensity).shl(8)
-    val newRGB = alpha.or(newRed).or(newGreen).or(intensity)
-    bufferedImage.setRGB(x, y, newRGB)
-}
-
 private fun getArgsMap(args: Array<String>): Map<String, String> {
-    if (args.size < 4) {
+    if (args.size < 8) {
         throw IllegalArgumentException("Wrong parameters")
     }
 
