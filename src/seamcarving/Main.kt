@@ -11,15 +11,56 @@ fun main(args: Array<String>) {
     val appArgs = getArgsMap(args)
 
     val bufferedImage = ImageIO.read(File(appArgs["-in"].orEmpty()))
-    val energyMap= calculatePixelsEnergy(bufferedImage)
-    val maxEnergy = energyMap.values.maxOf { it }
-    for (i in 0 until bufferedImage.width) {
-        for (j in 0 until bufferedImage.height) {
-            changePixel(bufferedImage, maxEnergy, energyMap, i, j)
+    val energyMap = calculatePixelsEnergy(bufferedImage)
+    findAndPaintSeamWithLowestEnergy(energyMap, bufferedImage)
+    ImageIO.write(bufferedImage, "png", File(appArgs["-out"].orEmpty()))
+}
+
+fun findAndPaintSeamWithLowestEnergy(energyMap: Map<Pixel, Double>, bufferedImage: BufferedImage) {
+    val costs = mutableMapOf<Pixel, Double>()
+    val parents = mutableMapOf<Pixel, Pixel>()
+    energyMap.entries.filter { it.key.y == 0 }.forEach { costs[it.key] = it.value}
+
+    // Используем динамическое программирование:
+    // Начинаем со второго ряда, для каждого пикселя ищем соседа сверху с минимальной энергией
+    // В costs складываем энергию текущего пикселя + энергию соседа сверху
+    // В parents отслеживаем цепочку соседей, чтобы потом вытащить весь seam
+    // В конце, в самом последнем ряду, пиксель с наименьшей суммой энергией будет начальной точкой шва,
+    // который мы вытащим из parents
+    // См. https://en.wikipedia.org/wiki/Seam_carving#Dynamic_programming
+    for (y in 1 until bufferedImage.height) {
+        for (x in 0 until bufferedImage.width) {
+            val currentPixel = Pixel(x, y)
+            val minNeighbor = getMinEnergyNeighbor(currentPixel, bufferedImage.width, costs)
+
+            costs[currentPixel] = energyMap[currentPixel]!! + costs[minNeighbor]!!
+            parents[currentPixel] = minNeighbor
         }
     }
 
-    ImageIO.write(bufferedImage, "png", File(appArgs["-out"].orEmpty()))
+    var lastMinPixel = costs.entries.filter { it.key.y == bufferedImage.height - 1 }.minByOrNull { it.value }?.key
+    while (lastMinPixel != null) {
+        paintPixelInRed(bufferedImage, lastMinPixel)
+        lastMinPixel = parents[lastMinPixel]
+    }
+}
+
+fun getMinEnergyNeighbor(currentPixel: Pixel, imageWidth: Int, costs: Map<Pixel, Double>): Pixel {
+    val set = mutableSetOf<Pixel>()
+    val pixelOne = Pixel(currentPixel.x, currentPixel.y - 1)
+    set += pixelOne
+
+    if (currentPixel.x != 0) {
+        val pixelTwo = Pixel(currentPixel.x - 1, currentPixel.y - 1)
+        set += pixelTwo
+    }
+
+    if (currentPixel.x != imageWidth - 1) {
+        val pixelThree = Pixel(currentPixel.x + 1, currentPixel.y - 1)
+        set += pixelThree
+    }
+
+    return set.minByOrNull { costs[it] ?: Double.POSITIVE_INFINITY } ?: Pixel(-1, -1)
 }
 
 fun calculatePixelsEnergy(bufferedImage: BufferedImage): Map<Pixel, Double> {
@@ -31,6 +72,13 @@ fun calculatePixelsEnergy(bufferedImage: BufferedImage): Map<Pixel, Double> {
         }
     }
     return energyMap
+}
+
+fun paintPixelInRed(bufferedImage: BufferedImage, pixel: Pixel?) {
+    val alpha = 255 shl 24
+    val red = 255 shl 16
+    val newColor = alpha or red
+    bufferedImage.setRGB(pixel?.x ?: -1, pixel?.y ?: -1, newColor)
 }
 
 fun calculatePixelEnergy(bufferedImage: BufferedImage, x: Int, y: Int): Double {
